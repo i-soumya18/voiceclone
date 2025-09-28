@@ -1,6 +1,6 @@
 """
-Text-to-Speech module with voice synthesis for Python 3.13 compatibility.
-Uses edge-tts and pyttsx3 as alternatives to Coqui TTS.
+Text-to-Speech module with voice synthesis and XTTS voice cloning support.
+Uses edge-tts, pyttsx3, and Coqui XTTS for comprehensive voice synthesis.
 """
 
 import logging
@@ -11,7 +11,7 @@ import tempfile
 import asyncio
 import os
 from pathlib import Path
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Union, Dict, Any, List
 import warnings
 
 # Suppress warnings
@@ -29,17 +29,35 @@ except ImportError:
     edge_tts = None
     print("⚠️  edge-tts not installed. Run: pip install edge-tts")
 
+try:
+    from .xtts_cloner import XTTSVoiceCloner
+    XTTS_AVAILABLE = True
+except ImportError:
+    XTTS_AVAILABLE = False
+    XTTSVoiceCloner = None
+    print("⚠️  XTTS not available. Voice cloning features disabled.")
+
 from .config import config
 
 
 class TextToSpeech:
-    """Text-to-Speech processor with multiple engine support for Python 3.13."""
+    """Text-to-Speech processor with multiple engine support and XTTS voice cloning."""
     
     def __init__(self):
         self.pyttsx3_engine = None
         self.sample_rate = config.sample_rate
         self.logger = logging.getLogger(__name__)
         self.edge_voices = None
+        
+        # Initialize XTTS voice cloner if available
+        self.xtts_cloner = None
+        if XTTS_AVAILABLE:
+            try:
+                self.xtts_cloner = XTTSVoiceCloner()
+                print("✅ XTTS voice cloner initialized")
+            except Exception as e:
+                print(f"⚠️  XTTS initialization failed: {e}")
+                self.xtts_cloner = None
         
         # Initialize TTS engines
         self._initialize_tts()
@@ -65,9 +83,13 @@ class TextToSpeech:
             if edge_tts:
                 print("✅ Edge TTS available")
             
-            if not self.pyttsx3_engine and not edge_tts:
+            # Check XTTS availability
+            if self.xtts_cloner:
+                print("✅ XTTS voice cloning available")
+            
+            if not self.pyttsx3_engine and not edge_tts and not self.xtts_cloner:
                 print("❌ No TTS engines available")
-                print("💡 Install with: pip install pyttsx3 edge-tts")
+                print("💡 Install with: pip install pyttsx3 edge-tts TTS")
             else:
                 print("✅ TTS system initialized")
                 
@@ -116,16 +138,20 @@ class TextToSpeech:
         text: str, 
         output_path: Optional[Union[str, Path]] = None,
         use_voice_clone: bool = True,
-        voice: str = "en-US-AriaNeural"
+        voice: str = "en-US-AriaNeural",
+        speaker_name: Optional[str] = None,
+        reference_audio: Optional[str] = None
     ) -> Optional[str]:
         """
-        Synthesize speech from text.
+        Synthesize speech from text with multiple engine options.
         
         Args:
             text: Text to convert to speech
             output_path: Path to save audio file (optional)
-            use_voice_clone: For compatibility (not used with current engines)
+            use_voice_clone: Whether to use XTTS voice cloning if available
             voice: Voice to use for Edge TTS
+            speaker_name: Name of custom XTTS speaker model
+            reference_audio: Reference audio for XTTS voice cloning
             
         Returns:
             Path to generated audio file, or None if failed
@@ -145,9 +171,56 @@ class TextToSpeech:
             
             output_path = str(Path(output_path))
             
-            # Try Edge TTS first (better quality)
+            # Try XTTS voice cloning first if requested and available
+            if use_voice_clone and self.xtts_cloner:
+                try:
+                    # Try custom speaker model first
+                    if speaker_name:
+                        print(f"🎭 Using XTTS custom speaker: {speaker_name}")
+                        result = self.xtts_cloner.synthesize_with_custom_voice(
+                            text=text,
+                            speaker_name=speaker_name,
+                            language="en",
+                            output_path=output_path
+                        )
+                        if result:
+                            print(f"✅ Speech synthesized with XTTS custom voice: {output_path}")
+                            return output_path
+                    
+                    # Try reference audio cloning
+                    elif reference_audio and Path(reference_audio).exists():
+                        print(f"🎭 Using XTTS with reference audio: {Path(reference_audio).name}")
+                        result = self.xtts_cloner.clone_voice(
+                            text=text,
+                            speaker_wav=reference_audio,
+                            language="en",
+                            output_path=output_path
+                        )
+                        if result:
+                            print(f"✅ Speech synthesized with XTTS voice cloning: {output_path}")
+                            return output_path
+                    
+                    # Try default reference audio
+                    elif config.reference_audio_path.exists():
+                        print(f"🎭 Using XTTS with default reference audio")
+                        result = self.xtts_cloner.clone_voice(
+                            text=text,
+                            speaker_wav=str(config.reference_audio_path),
+                            language="en",
+                            output_path=output_path
+                        )
+                        if result:
+                            print(f"✅ Speech synthesized with XTTS voice cloning: {output_path}")
+                            return output_path
+                    
+                    print("⚠️  XTTS voice cloning failed, falling back to other engines")
+                    
+                except Exception as e:
+                    print(f"⚠️  XTTS error: {e}, falling back to other engines")
+            
+            # Try Edge TTS (better quality)
             if edge_tts:
-                print("� Using Edge TTS (online)...")
+                print("💫 Using Edge TTS (online)...")
                 try:
                     # Run Edge TTS in async context
                     loop = asyncio.new_event_loop()
@@ -220,24 +293,34 @@ class TextToSpeech:
         use_voice_clone: bool = True, 
         save_audio: bool = False,
         output_dir: Optional[Path] = None,
-        voice: str = "en-US-AriaNeural"
+        voice: str = "en-US-AriaNeural",
+        speaker_name: Optional[str] = None,
+        reference_audio: Optional[str] = None
     ) -> bool:
         """
         Convert text to speech and play it immediately.
         
         Args:
             text: Text to speak
-            use_voice_clone: For compatibility (not used with current engines)
+            use_voice_clone: Whether to use voice cloning
             save_audio: Whether to save the audio file
             output_dir: Directory to save audio (if save_audio is True)
             voice: Voice to use for Edge TTS
+            speaker_name: Custom XTTS speaker model name
+            reference_audio: Reference audio for XTTS
             
         Returns:
             True if successful
         """
         try:
             # Generate speech
-            temp_audio_path = self.synthesize_speech(text, voice=voice)
+            temp_audio_path = self.synthesize_speech(
+                text=text, 
+                use_voice_clone=use_voice_clone,
+                voice=voice,
+                speaker_name=speaker_name,
+                reference_audio=reference_audio
+            )
             
             if not temp_audio_path:
                 # Fallback: try direct pyttsx3 speech
@@ -273,6 +356,63 @@ class TextToSpeech:
             print(f"❌ Error in speak_text: {e}")
             return False
     
+    # XTTS Voice Cloning Methods
+    
+    def load_xtts_model(self, model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2") -> bool:
+        """Load XTTS model for voice cloning."""
+        if not self.xtts_cloner:
+            print("❌ XTTS not available")
+            return False
+        
+        return self.xtts_cloner.load_pretrained_model(model_name)
+    
+    def clone_voice_from_audio(self, text: str, reference_audio: str, output_path: Optional[str] = None) -> Optional[str]:
+        """Clone voice using reference audio."""
+        if not self.xtts_cloner:
+            print("❌ XTTS not available")
+            return None
+        
+        return self.xtts_cloner.clone_voice(text, reference_audio, output_path=output_path)
+    
+    def create_speaker_model(self, speaker_name: str, audio_files: List[str], transcripts: Optional[List[str]] = None) -> Optional[str]:
+        """Create a custom speaker model from audio samples."""
+        if not self.xtts_cloner:
+            print("❌ XTTS not available")
+            return None
+        
+        # Prepare training data
+        dataset_path = self.xtts_cloner.prepare_training_data(speaker_name, audio_files, transcripts)
+        if not dataset_path:
+            return None
+        
+        # Fine-tune model (create speaker embeddings)
+        return self.xtts_cloner.fine_tune_model(dataset_path, speaker_name)
+    
+    def load_speaker_model(self, model_path: str) -> bool:
+        """Load a custom speaker model."""
+        if not self.xtts_cloner:
+            print("❌ XTTS not available")
+            return False
+        
+        return self.xtts_cloner.load_speaker_model(model_path)
+    
+    def list_speaker_models(self) -> List[Dict]:
+        """List available custom speaker models."""
+        if not self.xtts_cloner:
+            return []
+        
+        return self.xtts_cloner.list_speaker_models()
+    
+    def synthesize_with_speaker(self, text: str, speaker_name: str, output_path: Optional[str] = None) -> Optional[str]:
+        """Synthesize speech with a custom speaker model."""
+        if not self.xtts_cloner:
+            print("❌ XTTS not available")
+            return None
+        
+        return self.xtts_cloner.synthesize_with_custom_voice(text, speaker_name, output_path=output_path)
+    
+    # Existing methods continue...
+    
     def get_available_voices(self) -> Dict[str, Any]:
         """
         Get list of available voices.
@@ -306,6 +446,18 @@ class TextToSpeech:
             }
             voices.update(edge_voices)
         
+        # XTTS custom voices
+        if self.xtts_cloner:
+            speaker_models = self.list_speaker_models()
+            for model in speaker_models:
+                speaker_name = model.get("speaker_name", "unknown")
+                voices[f"xtts_{speaker_name}"] = {
+                    "name": f"XTTS {speaker_name}",
+                    "id": speaker_name,
+                    "engine": "xtts",
+                    "type": "custom"
+                }
+        
         return voices
     
     def test_tts(self, test_text: str = "Hello, this is a test of the text to speech system.") -> bool:
@@ -321,7 +473,7 @@ class TextToSpeech:
         try:
             print("🧪 Testing TTS functionality...")
             
-            if not self.pyttsx3_engine and not edge_tts:
+            if not self.pyttsx3_engine and not edge_tts and not self.xtts_cloner:
                 print("❌ No TTS engines available")
                 return False
             
@@ -339,87 +491,113 @@ class TextToSpeech:
             print(f"❌ TTS test error: {e}")
             return False
     
-    def test_voice_clone(self, test_text: str = "This is a test of voice synthesis.") -> bool:
+    def test_voice_clone(self, test_text: str = "This is a test of voice cloning technology.") -> bool:
         """
-        Test voice synthesis functionality.
-        Note: True voice cloning not available with current engines.
+        Test voice cloning functionality.
         
         Args:
             test_text: Text to use for testing
             
         Returns:
-            True if voice synthesis is working
+            True if voice cloning is working
         """
         try:
-            print("🧪 Testing voice synthesis functionality...")
-            print("ℹ️  Note: True voice cloning requires Coqui TTS (Python <3.12)")
+            print("🧪 Testing voice cloning functionality...")
             
-            if not self.pyttsx3_engine and not edge_tts:
-                print("❌ No TTS engines available")
-                return False
+            if not self.xtts_cloner:
+                print("⚠️  XTTS not available, testing alternative voice synthesis")
+                return self.test_tts(test_text)
             
-            # Test with different voice if available
-            voices = self.get_available_voices()
-            if voices:
-                # Try first available voice
-                first_voice = list(voices.keys())[0]
-                voice_info = voices[first_voice]
-                print(f"🎤 Testing with voice: {voice_info.get('name', first_voice)}")
-                
-                if voice_info.get('engine') == 'edge-tts':
-                    success = self.speak_text(test_text, voice=voice_info['id'])
-                else:
-                    # pyttsx3 voice
-                    if self.pyttsx3_engine:
-                        self.pyttsx3_engine.setProperty('voice', voice_info['id'])
-                    success = self.speak_text(test_text)
-            else:
-                success = self.speak_text(test_text)
+            # Load XTTS model if not loaded
+            if not self.xtts_cloner.model:
+                print("🔄 Loading XTTS model...")
+                if not self.load_xtts_model():
+                    print("❌ Failed to load XTTS model")
+                    return self.test_tts(test_text)
             
-            if success:
-                print("✅ Voice synthesis test passed")
-                return True
-            else:
-                print("❌ Voice synthesis test failed")
-                return False
+            # Test with default reference audio if available
+            if config.reference_audio_path.exists():
+                print(f"🎭 Testing voice cloning with reference audio")
+                result = self.clone_voice_from_audio(test_text, str(config.reference_audio_path))
+                if result:
+                    success = self.play_audio(result)
+                    # Clean up test file
+                    Path(result).unlink(missing_ok=True)
+                    if success:
+                        print("✅ Voice cloning test passed")
+                        return True
+            
+            # Test with custom speakers if available
+            speaker_models = self.list_speaker_models()
+            if speaker_models:
+                speaker_name = speaker_models[0].get("speaker_name")
+                print(f"🎭 Testing custom speaker: {speaker_name}")
+                result = self.synthesize_with_speaker(test_text, speaker_name)
+                if result:
+                    success = self.play_audio(result)
+                    # Clean up test file
+                    Path(result).unlink(missing_ok=True)
+                    if success:
+                        print("✅ Custom speaker test passed")
+                        return True
+            
+            print("⚠️  No reference audio or custom speakers available")
+            print("💡 Record reference audio or train a speaker model to test voice cloning")
+            return self.test_tts(test_text)
                 
         except Exception as e:
-            print(f"❌ Voice synthesis test error: {e}")
+            print(f"❌ Voice cloning test error: {e}")
             return False
     
-    def setup_voice_samples(self) -> bool:
+    def setup_voice_cloning(self) -> bool:
         """
-        Guide user through setting up voice samples for future voice cloning.
+        Guide user through setting up voice cloning.
         
         Returns:
             True if setup guidance is complete
         """
-        print("🎭 Voice Synthesis Setup")
+        print("🎭 Voice Cloning Setup")
         print("=" * 50)
         
-        print("ℹ️  Current TTS engines support multiple voices but not custom voice cloning.")
-        print("   For true voice cloning, Coqui TTS is required (Python <3.12)")
+        if not self.xtts_cloner:
+            print("❌ XTTS not available. Voice cloning requires Python 3.10/3.11.")
+            print("💡 Current features available:")
+            print("   - High-quality Edge TTS voices")
+            print("   - Offline pyttsx3 voices")
+            return False
+        
+        print("✅ XTTS voice cloning is available!")
         print("")
-        print("📋 Available options:")
-        print("1. Use high-quality Edge TTS voices (recommended)")
-        print("2. Use offline pyttsx3 voices")
-        print("3. For voice cloning: Use Python 3.11 environment with Coqui TTS")
+        print("📋 Voice cloning options:")
+        print("1. Quick clone: Use a single reference audio file")
+        print("2. Custom speaker: Train a model with multiple samples")
+        print("3. Load existing speaker model")
         print("")
         
-        # Show available voices
-        voices = self.get_available_voices()
-        if voices:
-            print("🎤 Available voices:")
-            for voice_id, voice_info in voices.items():
-                engine = voice_info.get('engine', 'unknown')
-                name = voice_info.get('name', voice_id)
-                print(f"   - {name} ({engine})")
+        # Check for existing reference audio
+        if config.reference_audio_path.exists():
+            print(f"✅ Reference audio found: {config.reference_audio_path}")
+        else:
+            print("⚠️  No reference audio found")
+            print(f"💡 Record reference audio and save as: {config.reference_audio_path}")
+        
+        # List existing speaker models
+        speaker_models = self.list_speaker_models()
+        if speaker_models:
+            print(f"\n🎤 Available speaker models ({len(speaker_models)}):")
+            for model in speaker_models:
+                name = model.get("speaker_name", "unknown")
+                status = model.get("status", "saved")
+                print(f"   - {name} ({status})")
+        else:
+            print("\n⚠️  No custom speaker models found")
+            print("💡 Create speaker models using the CLI: soumyagpt record-voice")
         
         return True
     
     def record_reference_voice(self, duration: float = 20.0) -> bool:
         """
-        Record reference voice for future voice cloning setup.
+        Record reference voice for voice cloning.
         
         Args:
             duration: Recording duration in seconds
@@ -429,7 +607,8 @@ class TextToSpeech:
         """
         try:
             print(f"🎤 Recording reference voice for {duration} seconds...")
-            print("   This will be saved for future voice cloning setup")
+            print("   This will be used for XTTS voice cloning")
+            print("   Speak clearly and naturally")
             print("   3... 2... 1... START!")
             
             # Record audio
@@ -448,16 +627,20 @@ class TextToSpeech:
             sf.write(str(reference_path), audio.flatten(), self.sample_rate)
             
             print(f"✅ Reference voice recorded: {reference_path}")
-            print("💡 This can be used with Coqui TTS in a Python 3.11 environment")
             
-            # Test current synthesis
-            print("🧪 Testing current voice synthesis...")
-            if self.test_tts("This is a test of the recorded voice setup."):
-                print("🎉 Voice recording and synthesis setup complete!")
-                return True
+            # Test voice cloning
+            if self.xtts_cloner:
+                print("🧪 Testing voice cloning with new reference...")
+                test_result = self.test_voice_clone("Hello, this is my cloned voice speaking.")
+                if test_result:
+                    print("🎉 Voice cloning setup complete!")
+                    return True
+                else:
+                    print("⚠️  Voice cloning test failed, but recording was saved.")
+                    return True
             else:
-                print("⚠️  Voice synthesis test failed, but recording was saved.")
-                return True  # Recording still successful
+                print("💡 XTTS not available, but reference audio saved for future use")
+                return True
                 
         except Exception as e:
             print(f"❌ Error recording reference voice: {e}")

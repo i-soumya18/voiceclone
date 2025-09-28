@@ -29,6 +29,7 @@ except ImportError:
 
 from .config import config
 from .pipeline import VoiceChatPipeline
+from .voice_recorder import VoiceRecorder
 
 
 def print_banner():
@@ -376,3 +377,350 @@ def _file_chat(pipeline, audio_file, enable_voice, save_audio, language):
 
 if __name__ == "__main__":
     main()
+
+
+# Voice Cloning Commands
+
+@main.command("record-voice")
+@click.option("--speaker", default="default", help="Speaker name for the voice model")
+@click.option("--samples", type=int, default=10, help="Number of voice samples to record")
+@click.option("--difficulty", type=click.Choice(["basic", "medium", "advanced"]), default="medium", help="Training sentence difficulty")
+@click.option("--device", type=int, default=None, help="Audio device ID")
+def record_voice(speaker, samples, difficulty, device):
+    """Record voice samples for training a custom voice model."""
+    
+    print(f"{Fore.CYAN}🎙️  Voice Recording Session{Style.RESET_ALL}")
+    print("=" * 50)
+    print(f"Speaker: {speaker}")
+    print(f"Samples to record: {samples}")
+    print(f"Difficulty: {difficulty}")
+    print("")
+    
+    try:
+        recorder = VoiceRecorder()
+        
+        # Test microphone first
+        if not recorder.test_microphone(device_id=device):
+            print(f"{Fore.RED}❌ Microphone test failed. Check your audio setup.{Style.RESET_ALL}")
+            return
+        
+        # Get training sentences
+        sentences = recorder.get_training_sentences(difficulty)
+        selected_sentences = sentences[:samples]
+        
+        # Record training set
+        recorded_files = recorder.record_training_set(
+            sentences=selected_sentences,
+            speaker_name=speaker,
+            device_id=device
+        )
+        
+        if recorded_files:
+            print(f"\n{Fore.GREEN}✅ Voice recording complete!{Style.RESET_ALL}")
+            print(f"Recorded {len(recorded_files)} samples")
+            print(f"Use 'soumyagpt train-voice --speaker {speaker}' to train the model")
+        else:
+            print(f"{Fore.RED}❌ Voice recording failed{Style.RESET_ALL}")
+            
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}Voice recording cancelled{Style.RESET_ALL}")
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error during voice recording: {e}{Style.RESET_ALL}")
+
+
+@main.command("train-voice")
+@click.option("--speaker", required=True, help="Speaker name to train")
+@click.option("--epochs", type=int, default=10, help="Training epochs")
+@click.option("--batch-size", type=int, default=2, help="Training batch size")
+def train_voice(speaker, epochs, batch_size):
+    """Train a custom voice model from recorded samples."""
+    
+    print(f"{Fore.CYAN}🎯 Training Voice Model{Style.RESET_ALL}")
+    print("=" * 50)
+    print(f"Speaker: {speaker}")
+    print(f"Epochs: {epochs}")
+    print(f"Batch size: {batch_size}")
+    print("")
+    
+    try:
+        from .tts import TextToSpeech
+        tts = TextToSpeech()
+        
+        if not tts.xtts_cloner:
+            print(f"{Fore.RED}❌ XTTS not available. Voice training requires Python 3.10/3.11.{Style.RESET_ALL}")
+            return
+        
+        # Find recorded samples for the speaker
+        voice_samples_dir = config.voice_samples_dir
+        audio_files = list(voice_samples_dir.glob(f"{speaker}_sample_*.wav"))
+        
+        if not audio_files:
+            print(f"{Fore.RED}❌ No voice samples found for speaker '{speaker}'{Style.RESET_ALL}")
+            print(f"Record samples first: soumyagpt record-voice --speaker {speaker}")
+            return
+        
+        print(f"Found {len(audio_files)} voice samples")
+        
+        # Create speaker model
+        model_path = tts.create_speaker_model(
+            speaker_name=speaker,
+            audio_files=[str(f) for f in audio_files]
+        )
+        
+        if model_path:
+            print(f"\n{Fore.GREEN}✅ Voice model trained successfully!{Style.RESET_ALL}")
+            print(f"Model saved: {model_path}")
+            print(f"Test with: soumyagpt test-voice --speaker {speaker}")
+        else:
+            print(f"{Fore.RED}❌ Voice model training failed{Style.RESET_ALL}")
+            
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error during voice training: {e}{Style.RESET_ALL}")
+
+
+@main.command("list-voices")
+def list_voices():
+    """List all available voices and models."""
+    
+    print(f"{Fore.CYAN}🎤 Available Voices{Style.RESET_ALL}")
+    print("=" * 50)
+    
+    try:
+        from .tts import TextToSpeech
+        tts = TextToSpeech()
+        
+        voices = tts.get_available_voices()
+        
+        if not voices:
+            print(f"{Fore.YELLOW}No voices available{Style.RESET_ALL}")
+            return
+        
+        # Group voices by engine
+        engines = {}
+        for voice_id, voice_info in voices.items():
+            engine = voice_info.get("engine", "unknown")
+            if engine not in engines:
+                engines[engine] = []
+            engines[engine].append((voice_id, voice_info))
+        
+        for engine, voice_list in engines.items():
+            print(f"\n{Fore.GREEN}{engine.upper()} Voices:{Style.RESET_ALL}")
+            for voice_id, voice_info in voice_list:
+                name = voice_info.get("name", voice_id)
+                voice_type = voice_info.get("type", "")
+                type_indicator = f" [{voice_type}]" if voice_type else ""
+                print(f"  - {name}{type_indicator}")
+        
+        # List recorded samples
+        recorder = VoiceRecorder()
+        samples = recorder.list_recorded_samples()
+        
+        if samples:
+            print(f"\n{Fore.BLUE}Recorded Voice Samples:{Style.RESET_ALL}")
+            for sample in samples[:10]:  # Show first 10
+                duration = sample['duration']
+                size_kb = sample['size_kb']
+                print(f"  - {sample['filename']} ({duration:.1f}s, {size_kb:.1f}KB)")
+                
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error listing voices: {e}{Style.RESET_ALL}")
+
+
+@main.command("test-voice")
+@click.option("--speaker", help="Test custom XTTS speaker")
+@click.option("--voice", help="Test specific voice ID")
+@click.option("--text", default="Hello, this is a test of my cloned voice speaking clearly.", help="Test text")
+def test_voice(speaker, voice, text):
+    """Test voice synthesis with different voices."""
+    
+    print(f"{Fore.CYAN}🧪 Testing Voice Synthesis{Style.RESET_ALL}")
+    print("=" * 50)
+    print(f"Text: \"{text}\"")
+    
+    if speaker:
+        print(f"Testing custom speaker: {speaker}")
+    elif voice:
+        print(f"Testing voice: {voice}")
+    else:
+        print("Testing default voice synthesis")
+    
+    print("")
+    
+    try:
+        from .tts import TextToSpeech
+        tts = TextToSpeech()
+        
+        # Test with custom speaker
+        if speaker:
+            if tts.xtts_cloner:
+                result = tts.synthesize_with_speaker(text, speaker)
+                if result:
+                    success = tts.play_audio(result)
+                    # Clean up
+                    Path(result).unlink(missing_ok=True)
+                    if success:
+                        print(f"{Fore.GREEN}✅ Custom speaker test successful{Style.RESET_ALL}")
+                    else:
+                        print(f"{Fore.RED}❌ Audio playback failed{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.RED}❌ Custom speaker synthesis failed{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}❌ XTTS not available for custom speakers{Style.RESET_ALL}")
+        
+        # Test with specific voice
+        elif voice:
+            success = tts.speak_text(text, voice=voice, use_voice_clone=False)
+            if success:
+                print(f"{Fore.GREEN}✅ Voice test successful{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}❌ Voice test failed{Style.RESET_ALL}")
+        
+        # Test default
+        else:
+            if tts.test_voice_clone(text):
+                print(f"{Fore.GREEN}✅ Voice cloning test successful{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}⚠️  Voice cloning not available, testing regular TTS{Style.RESET_ALL}")
+                if tts.test_tts(text):
+                    print(f"{Fore.GREEN}✅ TTS test successful{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.RED}❌ TTS test failed{Style.RESET_ALL}")
+                    
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error during voice test: {e}{Style.RESET_ALL}")
+
+
+@main.command("clone-voice")
+@click.argument("text")
+@click.option("--reference", type=click.Path(exists=True), help="Reference audio file")
+@click.option("--speaker", help="Use trained speaker model")
+@click.option("--output", type=click.Path(), help="Output audio file path")
+@click.option("--play", is_flag=True, help="Play the generated audio")
+def clone_voice(text, reference, speaker, output, play):
+    """Clone voice with specific text using reference audio or trained model."""
+    
+    print(f"{Fore.CYAN}🎭 Voice Cloning{Style.RESET_ALL}")
+    print("=" * 50)
+    print(f"Text: \"{text}\"")
+    
+    if reference:
+        print(f"Reference: {reference}")
+    elif speaker:
+        print(f"Speaker model: {speaker}")
+    else:
+        print("Using default reference audio")
+    
+    print("")
+    
+    try:
+        from .tts import TextToSpeech
+        tts = TextToSpeech()
+        
+        if not tts.xtts_cloner:
+            print(f"{Fore.RED}❌ XTTS not available. Voice cloning requires Python 3.10/3.11.{Style.RESET_ALL}")
+            return
+        
+        # Load XTTS model if not loaded
+        if not tts.xtts_cloner.model:
+            print("🔄 Loading XTTS model...")
+            if not tts.load_xtts_model():
+                print(f"{Fore.RED}❌ Failed to load XTTS model{Style.RESET_ALL}")
+                return
+        
+        result_path = None
+        
+        # Clone with reference audio
+        if reference:
+            result_path = tts.clone_voice_from_audio(text, reference, output)
+        
+        # Clone with speaker model
+        elif speaker:
+            result_path = tts.synthesize_with_speaker(text, speaker, output)
+        
+        # Clone with default reference
+        else:
+            if config.reference_audio_path.exists():
+                result_path = tts.clone_voice_from_audio(text, str(config.reference_audio_path), output)
+            else:
+                print(f"{Fore.RED}❌ No default reference audio found{Style.RESET_ALL}")
+                print(f"Record reference: soumyagpt setup-voice")
+                return
+        
+        if result_path:
+            print(f"{Fore.GREEN}✅ Voice cloning successful!{Style.RESET_ALL}")
+            print(f"Generated: {result_path}")
+            
+            if play:
+                print("🔊 Playing generated audio...")
+                tts.play_audio(result_path)
+        else:
+            print(f"{Fore.RED}❌ Voice cloning failed{Style.RESET_ALL}")
+            
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error during voice cloning: {e}{Style.RESET_ALL}")
+
+
+@main.command("devices")
+def devices():
+    """List available audio devices."""
+    
+    print(f"{Fore.CYAN}🎤 Audio Devices{Style.RESET_ALL}")
+    print("=" * 50)
+    
+    try:
+        recorder = VoiceRecorder()
+        device_info = recorder.list_audio_devices()
+        
+        input_devices = device_info.get("input_devices", [])
+        default_device = device_info.get("default_device")
+        
+        if input_devices:
+            print(f"{Fore.GREEN}Input Devices:{Style.RESET_ALL}")
+            for device in input_devices:
+                device_id = device["id"]
+                name = device["name"]
+                channels = device["channels"]
+                sample_rate = device["sample_rate"]
+                
+                default_indicator = " [DEFAULT]" if device_id == default_device else ""
+                print(f"  {device_id}: {name}{default_indicator}")
+                print(f"      Channels: {channels}, Sample Rate: {sample_rate}Hz")
+        else:
+            print(f"{Fore.YELLOW}No input devices found{Style.RESET_ALL}")
+            
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error listing devices: {e}{Style.RESET_ALL}")
+
+
+# Update the existing setup-voice command to include voice cloning setup
+@main.command("setup-voice")
+@click.option("--duration", type=float, default=20.0, help="Recording duration in seconds")
+def setup_voice_enhanced(duration):
+    """Set up voice samples and test voice cloning (enhanced version)."""
+    
+    print(f"{Fore.CYAN}🎭 Enhanced Voice Setup{Style.RESET_ALL}")
+    print("=" * 50)
+    
+    try:
+        from .tts import TextToSpeech
+        tts = TextToSpeech()
+        
+        # Show voice cloning setup
+        tts.setup_voice_cloning()
+        
+        # Record reference voice
+        if click.confirm("\nWould you like to record reference audio for voice cloning?"):
+            success = tts.record_reference_voice(duration)
+            if success:
+                print(f"{Fore.GREEN}✅ Reference audio recording complete!{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}❌ Reference audio recording failed{Style.RESET_ALL}")
+        
+        # Test voice synthesis
+        if click.confirm("\nWould you like to test voice synthesis?"):
+            tts.test_voice_clone()
+            
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}Voice setup cancelled{Style.RESET_ALL}")
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error during voice setup: {e}{Style.RESET_ALL}")

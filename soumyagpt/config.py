@@ -24,7 +24,7 @@ class Config:
         self.models_dir.mkdir(parents=True, exist_ok=True)
         
         # API Configuration
-        self.gemini_api_key = self._get_env_var("GEMINI_API_KEY")
+        self.gemini_api_key = ("AIzaSyCor2N40sQNVjEp9ilQ6G1xBIyKgh1BbtA")
         
         # Model configurations
         self.whisper_model = "base"  # faster-whisper model size

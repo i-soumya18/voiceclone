@@ -1,0 +1,36 @@
+# SoumyaGPT Requirements - Python 3.13 Compatible
+# Core dependencies for voice-cloned CLI chatbot
+
+# CLI Framework
+click>=8.0.0
+colorama>=0.4.0
+rich>=13.0.0
+
+# Speech-to-Text (Faster Whisper)
+faster-whisper>=1.0.0
+sounddevice>=0.4.0
+soundfile>=0.12.0
+
+# AI/LLM (Gemini)
+google-generativeai>=0.8.0
+
+# Text-to-Speech (Alternative to Coqui TTS for Python 3.13)
+pyttsx3>=2.90  # Cross-platform TTS library
+edge-tts>=6.1.0  # Microsoft Edge TTS (high quality)
+
+# Audio Processing
+numpy>=1.21.0
+pydub>=0.25.0
+
+# PyTorch (latest version for Python 3.13)
+torch>=2.1.0
+torchaudio>=2.1.0
+
+# Additional utilities
+scipy>=1.9.0
+
+# Development dependencies (optional)
+pytest>=7.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0

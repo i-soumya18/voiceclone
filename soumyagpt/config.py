@@ -37,10 +37,10 @@ class Config:
         self.pyttsx3_rate = 150  # Speech rate for pyttsx3
         self.pyttsx3_volume = 0.9  # Volume for pyttsx3
         
-        # Legacy voice cloning (for Coqui TTS compatibility)
-        self.tts_model_name = "edge-tts"  # Updated for new system
-        self.voice_clone_model = "edge-tts"  # Updated for new system
-        self.reference_audio_path = self.voice_samples_dir / "reference.wav"
+        # Voice cloning configuration
+        self.tts_model_name = "xtts"  # Use XTTS for voice cloning
+        self.voice_clone_model = "xtts"  # XTTS voice cloning
+        self.reference_audio_path = self.voice_samples_dir / "obama-original.wav"  # Use Obama voice
         
         # Audio settings
         self.sample_rate = 22050

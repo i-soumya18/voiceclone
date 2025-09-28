@@ -30,6 +30,10 @@ except ImportError:
 from .config import config
 from .pipeline import VoiceChatPipeline
 from .voice_recorder import VoiceRecorder
+from .voice_manager import SimpleVoiceManager
+
+# Global voice manager instance
+voice_manager = SimpleVoiceManager()
 
 
 def print_banner():
@@ -41,6 +45,8 @@ def print_banner():
 {Fore.WHITE}Hardware: GTX 1650 + i5 + 24GB RAM optimized{Style.RESET_ALL}
 """
     print(banner)
+
+
 
 
 def print_status():
@@ -724,3 +730,260 @@ def setup_voice_enhanced(duration):
         print(f"\n{Fore.YELLOW}Voice setup cancelled{Style.RESET_ALL}")
     except Exception as e:
         print(f"{Fore.RED}❌ Error during voice setup: {e}{Style.RESET_ALL}")
+
+
+# ==========================================
+# SIMPLIFIED VOICE COMMANDS
+# ==========================================
+
+@main.command("record")
+@click.argument('voice_name')
+@click.option('--display-name', help='Friendly display name for the voice')
+@click.option('--samples', default=3, help='Number of voice samples to record (default: 3)')
+def record_simple(voice_name, display_name, samples):
+    """🎤 Record your voice for AI cloning (EASY MODE)"""
+    try:
+        
+        if not display_name:
+            display_name = voice_name.title()
+        
+        print(f"\n{Fore.CYAN}🎙️  Let's create your AI voice clone!{Style.RESET_ALL}")
+        print(f"🎯 Voice name: {Fore.GREEN}{display_name}{Style.RESET_ALL}")
+        print(f"📊 We'll record {samples} voice samples")
+        print("💡 Tip: Speak clearly and naturally for best results\n")
+        
+        success = voice_manager.record_voice_samples(
+            voice_name=voice_name,
+            display_name=display_name,
+            num_samples=samples
+        )
+        
+        if success:
+            print(f"\n{Fore.GREEN}🎉 Great! Voice samples recorded for '{display_name}'{Style.RESET_ALL}")
+            print(f"🚀 Next step: {Fore.YELLOW}python -m soumyagpt.cli train {voice_name}{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.RED}❌ Voice recording failed{Style.RESET_ALL}")
+            
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error: {e}{Style.RESET_ALL}")
+
+
+@main.command("train")
+@click.argument('voice_name')
+def train_simple(voice_name):
+    """🧠 Train your AI voice from recorded samples"""
+    try:
+        
+        print(f"{Fore.CYAN}🧠 Training your AI voice clone...{Style.RESET_ALL}")
+        success = voice_manager.train_voice(voice_name)
+        
+        if success:
+            print(f"\n{Fore.GREEN}🎉 SUCCESS! Your AI voice is ready!{Style.RESET_ALL}")
+            print(f"🎭 Test it: {Fore.YELLOW}python -m soumyagpt.cli say 'Hello world' --voice {voice_name}{Style.RESET_ALL}")
+            print(f"⭐ Set as default: {Fore.YELLOW}python -m soumyagpt.cli use {voice_name}{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.RED}❌ Voice training failed{Style.RESET_ALL}")
+            
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error: {e}{Style.RESET_ALL}")
+
+
+@main.command("use")
+@click.argument('voice_name')
+def use_voice(voice_name):
+    """⭐ Set a voice as your default AI voice"""
+    try:
+        
+        success = voice_manager.set_default_voice(voice_name)
+        if success:
+            voice_data = voice_manager.voices_db["voices"][voice_name]
+            print(f"{Fore.GREEN}✅ Your AI will now speak with '{voice_data['display_name']}' voice by default!{Style.RESET_ALL}")
+        
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error: {e}{Style.RESET_ALL}")
+
+
+@main.command("voices")
+def list_voices_simple():
+    """🎭 List all your voice clones"""
+    try:
+        import time
+        
+        available_voices = voice_manager.list_available_voices()
+        
+        if not available_voices:
+            print(f"{Fore.YELLOW}🎤 No voice clones found yet!{Style.RESET_ALL}")
+            print(f"💡 Create your first voice: {Fore.CYAN}python -m soumyagpt.cli record myvoice{Style.RESET_ALL}")
+            return
+        
+        print(f"\n{Fore.CYAN}🎭 Your Voice Clones ({len(available_voices)} total):{Style.RESET_ALL}")
+        print("=" * 50)
+        
+        for voice in available_voices:
+            status = f"{Fore.GREEN}✅ Ready{Style.RESET_ALL}" if voice["trained"] else f"{Fore.YELLOW}⏳ Not trained{Style.RESET_ALL}"
+            default = f" {Fore.MAGENTA}⭐ DEFAULT{Style.RESET_ALL}" if voice["is_default"] else ""
+            
+            print(f"🎤 {Fore.WHITE}{voice['display_name']}{Style.RESET_ALL} ({voice['name']})")
+            print(f"   Status: {status}{default}")
+            print(f"   Samples: {voice['samples']}")
+            if voice["created"]:
+                created_time = time.strftime("%Y-%m-%d %H:%M", time.localtime(voice["created"]))
+                print(f"   Created: {created_time}")
+            print()
+        
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error: {e}{Style.RESET_ALL}")
+
+
+@main.command("import")
+@click.argument('voice_name')
+@click.argument('audio_file', type=click.Path(exists=True))
+@click.option('--display-name', help='Friendly display name for the voice')
+def import_voice(voice_name, audio_file, display_name):
+    """Import an existing audio file as a voice clone"""
+    try:
+        if not display_name:
+            display_name = voice_name.title()
+        
+        print(f"Importing voice: {Fore.GREEN}{display_name}{Style.RESET_ALL}")
+        print(f"From file: {audio_file}")
+        
+        # Import the voice
+        success = voice_manager.import_voice(voice_name, audio_file, display_name)
+        
+        if success:
+            print(f"✅ Voice '{display_name}' imported successfully!")
+            print(f"🎯 Try it: python -m soumyagpt say 'Hello world' --voice {voice_name}")
+        else:
+            print(f"❌ Failed to import voice")
+            
+    except Exception as e:
+        print(f"❌ Error importing voice: {e}")
+        return False
+
+
+@main.command("say")
+@click.argument('text')
+@click.option('--voice', help='Voice to use (leave empty for default)')
+@click.option('--save', help='Save audio to file')
+def say_text(text, voice, save):
+    """🗣️ Make your AI speak any text using your cloned voice!"""
+    try:
+        from .tts import TextToSpeech
+        
+        # Determine which voice to use
+        if not voice:
+            voice = voice_manager.get_default_voice()
+            if not voice:
+                print(f"{Fore.YELLOW}🤖 No default voice set. Using system voice...{Style.RESET_ALL}")
+                voice = None
+        
+        # Get reference audio for the voice
+        reference_audio = None
+        if voice:
+            reference_audio = voice_manager.get_voice_reference_audio(voice)
+            if reference_audio:
+                voice_data = voice_manager.voices_db["voices"][voice]
+                print(f"🎭 Using voice: {Fore.GREEN}{voice_data['display_name']}{Style.RESET_ALL}")
+        
+        tts = TextToSpeech()
+        
+        # Generate speech
+        audio_file = tts.synthesize_speech(
+            text=text,
+            use_voice_clone=bool(reference_audio),
+            reference_audio=reference_audio,
+            output_path=save
+        )
+        
+        if audio_file:
+            print(f"🔊 Playing: '{text[:50]}{'...' if len(text) > 50 else ''}'")
+            # Play the audio
+            try:
+                import sounddevice as sd
+                import soundfile as sf
+                
+                audio_data, sample_rate = sf.read(audio_file)
+                sd.play(audio_data, sample_rate)
+                sd.wait()
+                print(f"{Fore.GREEN}✅ Speech completed{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.YELLOW}⚠️  Could not play audio: {e}{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.RED}❌ Failed to generate speech{Style.RESET_ALL}")
+            
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error: {e}{Style.RESET_ALL}")
+
+
+@main.command("delete")
+@click.argument('voice_name')
+@click.confirmation_option(prompt='Are you sure you want to delete this voice?')
+def delete_voice_simple(voice_name):
+    """🗑️ Delete a voice clone and all its data"""
+    try:
+        
+        success = voice_manager.delete_voice(voice_name)
+        if success:
+            print(f"{Fore.GREEN}✅ Voice deleted successfully{Style.RESET_ALL}")
+        
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error: {e}{Style.RESET_ALL}")
+
+
+@main.command("quick-setup")
+@click.argument('voice_name')
+@click.option('--display-name', help='Friendly display name')
+def quick_setup(voice_name, display_name):
+    """🚀 SUPER EASY: Record, train, and set up your voice in one go!"""
+    try:
+        
+        if not display_name:
+            display_name = voice_name.title()
+        
+        print(f"\n{Fore.CYAN}🚀 QUICK VOICE SETUP{Style.RESET_ALL}")
+        print("=" * 30)
+        print(f"Creating voice: {Fore.GREEN}{display_name}{Style.RESET_ALL}")
+        print("\nThis will:")
+        print("1️⃣ Record 3 voice samples")
+        print("2️⃣ Train your AI voice")
+        print("3️⃣ Set it as default")
+        print()
+        
+        if not click.confirm("Ready to start?"):
+            print("Cancelled.")
+            return
+        
+        # Step 1: Record
+        print(f"\n{Fore.YELLOW}📍 STEP 1: Recording voice samples{Style.RESET_ALL}")
+        success = voice_manager.record_voice_samples(
+            voice_name=voice_name,
+            display_name=display_name,
+            num_samples=3
+        )
+        
+        if not success:
+            print(f"{Fore.RED}❌ Recording failed{Style.RESET_ALL}")
+            return
+        
+        # Step 2: Train
+        print(f"\n{Fore.YELLOW}📍 STEP 2: Training AI voice{Style.RESET_ALL}")
+        success = voice_manager.train_voice(voice_name)
+        
+        if not success:
+            print(f"{Fore.RED}❌ Training failed{Style.RESET_ALL}")
+            return
+        
+        # Step 3: Set as default
+        print(f"\n{Fore.YELLOW}📍 STEP 3: Setting as default{Style.RESET_ALL}")
+        voice_manager.set_default_voice(voice_name)
+        
+        # Success!
+        print(f"\n{Fore.GREEN}🎉 ALL DONE!{Style.RESET_ALL}")
+        print(f"✅ Your AI voice '{display_name}' is ready!")
+        print(f"🎭 Test it: {Fore.CYAN}python -m soumyagpt.cli say 'Hello, this is my AI voice!'{Style.RESET_ALL}")
+        
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}Setup cancelled{Style.RESET_ALL}")
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error: {e}{Style.RESET_ALL}")

@@ -39,6 +39,13 @@ except ImportError:
 
 from .config import config
 
+try:
+    from .voice_manager import SimpleVoiceManager
+    VOICE_MANAGER_AVAILABLE = True
+except ImportError:
+    VOICE_MANAGER_AVAILABLE = False
+    SimpleVoiceManager = None
+
 
 class TextToSpeech:
     """Text-to-Speech processor with multiple engine support and XTTS voice cloning."""
@@ -54,10 +61,25 @@ class TextToSpeech:
         if XTTS_AVAILABLE:
             try:
                 self.xtts_cloner = XTTSVoiceCloner()
-                print("✅ XTTS voice cloner initialized")
+                # Load the XTTS model immediately
+                if self.xtts_cloner.load_pretrained_model():
+                    print("✅ XTTS voice cloner initialized and model loaded")
+                else:
+                    print("⚠️  XTTS model loading failed")
+                    self.xtts_cloner = None
             except Exception as e:
                 print(f"⚠️  XTTS initialization failed: {e}")
                 self.xtts_cloner = None
+        
+        # Initialize Voice Manager if available
+        self.voice_manager = None
+        if VOICE_MANAGER_AVAILABLE:
+            try:
+                self.voice_manager = SimpleVoiceManager()
+                print("✅ Voice Manager initialized")
+            except Exception as e:
+                print(f"⚠️  Voice Manager initialization failed: {e}")
+                self.voice_manager = None
         
         # Initialize TTS engines
         self._initialize_tts()
@@ -139,7 +161,7 @@ class TextToSpeech:
         output_path: Optional[Union[str, Path]] = None,
         use_voice_clone: bool = True,
         voice: str = "en-US-AriaNeural",
-        speaker_name: Optional[str] = None,
+        voice_name: Optional[str] = None,  # Updated from speaker_name
         reference_audio: Optional[str] = None
     ) -> Optional[str]:
         """
@@ -174,12 +196,27 @@ class TextToSpeech:
             # Try XTTS voice cloning first if requested and available
             if use_voice_clone and self.xtts_cloner:
                 try:
-                    # Try custom speaker model first
-                    if speaker_name:
-                        print(f"🎭 Using XTTS custom speaker: {speaker_name}")
+                    # Try voice manager for trained voices first
+                    if voice_name and self.voice_manager:
+                        voice_audio = self.voice_manager.get_voice_reference_audio(voice_name)
+                        if voice_audio:
+                            print(f"🎭 Using trained voice from Voice Manager: {voice_name}")
+                            result = self.xtts_cloner.clone_voice(
+                                text=text,
+                                speaker_wav=voice_audio,
+                                language="en",
+                                output_path=output_path
+                            )
+                            if result:
+                                print(f"✅ Speech synthesized with trained voice: {output_path}")
+                                return output_path
+                    
+                    # Try custom speaker model
+                    elif voice_name:
+                        print(f"🎭 Using XTTS custom speaker: {voice_name}")
                         result = self.xtts_cloner.synthesize_with_custom_voice(
                             text=text,
-                            speaker_name=speaker_name,
+                            speaker_name=voice_name,
                             language="en",
                             output_path=output_path
                         )
@@ -211,6 +248,18 @@ class TextToSpeech:
                         )
                         if result:
                             print(f"✅ Speech synthesized with XTTS voice cloning: {output_path}")
+                            return output_path
+                    
+                    # Try direct XTTS synthesis without reference audio
+                    else:
+                        print("🎭 Using XTTS direct synthesis (no reference audio)")
+                        result = self.xtts_cloner.synthesize_direct(
+                            text=text,
+                            language="en",
+                            output_path=output_path
+                        )
+                        if result:
+                            print(f"✅ Speech synthesized with XTTS direct mode: {output_path}")
                             return output_path
                     
                     print("⚠️  XTTS voice cloning failed, falling back to other engines")
